@@ -1,7 +1,7 @@
 # Trimarr (optional add-on for Tubarr): trims SponsorBlock "sponsor" / "self-promotion" segments out of videos that
 # are already in the library, keeping the original for undo. One small container: python-slim + ffmpeg, SQLite.
 # Base image pinned by multi-arch index digest (tag kept for readability; Dependabot bumps both).
-FROM python:3.12-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
+FROM python:3.14-slim-trixie@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TZ=UTC HOME=/data
