@@ -229,6 +229,8 @@ Then switch it on in Tubarr: **Settings → Trim ads** (it ships off). See [trim
 
 **What gets deleted when the library is full?** The oldest video that may be deleted, one at a time. Never deleted: videos marked "Keep forever", each channel's newest few, anything playing right now, and anything that's gone from YouTube. Before any automatic delete, Tubarr checks with YouTube that the video is still up.
 
+**Will it run on a Raspberry Pi?** Yes, on a Pi 4 or Pi 5 running a 64-bit OS (the default on current Raspberry Pi OS); Docker picks the arm64 image automatically. Use 4 GB of RAM or more for 4K, and keep the videos on a USB drive, not the SD card. A Pi 3 works but is slow; Pi Zero/1/2 and 32-bit OS installs aren't supported.
+
 **Where are the logs?** `docker compose logs tubarr`, plus `data/logs/worker.log`. Secrets are scrubbed from both.
 
 **How do I read the API?** See [docs/API.md](docs/API.md). Use an API key from Settings → Account in the `X-Api-Key` header.
