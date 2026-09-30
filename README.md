@@ -73,14 +73,19 @@ Tubarr is a self-hosted "arr" for YouTube. You give it the channels you follow; 
 
 You need Docker with Compose, and (recommended) a Plex Media Server that can see the same media folder.
 
+No need to clone the repo or build anything: two files are enough.
+
 ```bash
-git clone https://github.com/spongebobmoviept-lab/tubarr.git && cd tubarr
-cp .env.example .env
+mkdir tubarr && cd tubarr
+curl -fsSLO https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.0/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.0/.env.example
 # edit .env: YOUTUBE_DIR (where videos go), PUID/PGID, TZ
 mkdir -p data && sudo chown -R 1000:1000 data "$YOUTUBE_DIR"   # match PUID:PGID
-docker compose up -d --build
+docker compose up -d          # downloads the ready-made image, nothing to build
 docker compose logs tubarr | grep "Setup code"
 ```
+
+Images for amd64 and arm64 (e.g. Raspberry Pi 4/5) are published at `ghcr.io/spongebobmoviept-lab/tubarr`. To build from source instead, uncomment `build:` in `docker-compose.yml` (it builds straight from this GitHub repo) and run `docker compose up -d --build`. Portainer/Dockge users can paste `docker-compose.yml` as a stack and set `YOUTUBE_DIR` in its environment.
 
 By default the web UI is published on `127.0.0.1:9194`, this host only (see [Remote access](#remote-access) before
 opening it to your network). Open `http://localhost:9194` (or an SSH tunnel to it) and follow the setup:
@@ -199,14 +204,14 @@ Trimarr is a separate, small container that removes SponsorBlock-labelled **spon
 ```bash
 # in .env: TRIMARR_URL=http://trimarr:8791 and TRIMARR_TOKEN=<openssl rand -hex 32>
 mkdir -p trimarr-data && sudo chown 1000:1000 trimarr-data
-docker compose --profile trimarr up -d --build
+docker compose --profile trimarr up -d
 ```
 
 Then switch it on in Tubarr: **Settings → Trim ads** (it ships off). See [trimarr/README.md](trimarr/README.md).
 
 ## Updating
 
-- **Tubarr:** `git pull && docker compose up -d --build`, or with a published image, `docker compose pull && docker compose up -d`.
+- **Tubarr:** change the image tag in `docker-compose.yml` to the new release (or re-download the file), then `docker compose pull && docker compose up -d`.
 - **yt-dlp** has to keep up with YouTube. The image ships a pinned, hash-verified yt-dlp; update it by pulling a newer Tubarr image. Optional: `TUBARR_YTDLP_AUTOUPDATE=1` fetches the newest yt-dlp release from PyPI at every container start (wheels only, into an in-memory folder, never the data folder, so nothing downloaded survives a restart). That code isn't hash-pinned: turning it on means trusting PyPI and yt-dlp's release process at every start, which is why it's off by default. If PyPI can't be reached, the image's version is used. A `.pylib` folder in the data folder from an older version is no longer used and can be deleted. yt-dlp only loads plugins from the image itself, never from the data folder.
 - **PO-token helper:** it's pinned by digest in `docker-compose.yml`. When you update it, also bump `bgutil-ytdlp-pot-provider` in `requirements.txt` to the matching version and rebuild.
 

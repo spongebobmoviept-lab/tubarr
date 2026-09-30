@@ -11,12 +11,14 @@
 # (README -> "Remote access").
 services:
   tubarr:
-    build: .
-    image: tubarr:local                      # or a published image, e.g. ghcr.io/spongebobmoviept-lab/tubarr:0.1.0 (remove build:)
+    image: ghcr.io/spongebobmoviept-lab/tubarr:0.1.0   # ready-made image (amd64 + arm64)
+    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.0   # build from source instead (no clone needed): uncomment, then `docker compose up -d --build`
     container_name: tubarr
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"      # the image refuses to run as root (uid 0)
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false                       # settings can also live in this file's environment: block
     environment:
       - TZ=${TZ:-UTC}
       - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # only used with the trimarr profile (the same value goes to Trimarr)
@@ -78,8 +80,8 @@ services:
   # Tubarr refreshes Plex after a trim. Its own egress network is only for the SponsorBlock API.
   trimarr:
     profiles: ["trimarr"]
-    build: ./trimarr
-    image: trimarr:local
+    image: ghcr.io/spongebobmoviept-lab/trimarr:0.1.0  # ready-made image (amd64 + arm64)
+    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.0:trimarr   # build from source instead
     container_name: trimarr
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
