@@ -1,6 +1,11 @@
 """The service: one process, one container. A pass = scan the library, re-check SponsorBlock for what's due, trim
 what's eligible one video at a time. Then it sleeps (default 24 h) and wakes only for API requests and an hourly
-look at expired originals."""
+look at expired originals.
+
+Off (the default, until trimming is switched on in Tubarr: Settings -> Trim ads) means idle: no passes, no library
+scan, no SponsorBlock request, no file changes. It only answers Tubarr's API and does what a signed-in user asks for
+there (a single trim, undo, check or "Run a pass now"). The one exception is originals Trimarr itself kept from
+earlier trims: their keep period still runs out while it's off."""
 import collections
 import logging
 import signal
@@ -136,12 +141,42 @@ class Service:
         log.info("pass done: %s", stats)
         return blocked_until
 
+    def active(self):
+        """A pass may run: trimming is on, or someone asked for a pass."""
+        return bool(settings.load()["enabled"]) or self.pass_requested
+
+    @staticmethod
+    def keeps_originals():
+        return db.one("SELECT 1 AS x FROM videos WHERE backup_path IS NOT NULL LIMIT 1") is not None
+
+    def idle(self, wait=60):
+        """Trimming is off: wait for API requests, the switch-on or a requested pass. Touches nothing on its own (only
+        originals kept from earlier trims still expire, hourly)."""
+        self.state = "off"
+        self.next_pass_at = None
+        last_hk = time.time()
+        while not self.stop.is_set() and not self.active():
+            self.wake.wait(timeout=wait)
+            self.wake.clear()
+            self.do_jobs()
+            if time.time() - last_hk > 3600:
+                last_hk = time.time()
+                if self.keeps_originals():
+                    trimmer.housekeeping()
+
     def run_forever(self):
         api.start(self)
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, lambda *_: (self.stop.set(), self.wake.set()))
         log.info("Trimarr service up (API on :%s)", api.port())
+        api.wait_for_token(stop=self.stop)
         while not self.stop.is_set():
+            if not self.active():
+                log.info("automatic trimming is off: idle (no scans, no SponsorBlock requests) until it's switched on "
+                         "in Tubarr")
+                self.idle()
+                continue
+            self.pass_requested = False
             try:
                 blocked_until = self.run_pass()
             except Exception as e:
@@ -158,9 +193,10 @@ class Service:
                 self.wake.wait(timeout=60)
                 self.wake.clear()
                 self.do_jobs()
+                if not settings.load()["enabled"]:
+                    break                                           # switched off: go idle now
                 if time.time() - last_hk > 3600:
                     trimmer.housekeeping()
                     last_hk = time.time()
-            self.pass_requested = False
         self.state = "stopped"
         log.info("Trimarr service stopped")

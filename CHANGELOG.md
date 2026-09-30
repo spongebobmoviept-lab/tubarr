@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-09-30
+
+Tubarr and Trimarr now install as one: a single `docker compose up -d`, nothing extra to set up.
+
+### Changed
+- `docker-compose.yml` starts Trimarr with Tubarr (no more `--profile trimarr`). They stay two containers on their
+  own internal network, as before. `TRIMARR_URL` defaults to `http://trimarr:8791` (`off` hides Trimarr).
+- Trimarr is idle while trimming is off (the default): no library scan, no SponsorBlock request, no file changes
+  until you switch it on in Tubarr (Settings → Trim ads), which starts the first pass right away. Resuming while off
+  starts nothing. Originals kept from earlier trims still expire.
+- Docs: one-step quick start; `TRIMARR_TOKEN` is now an optional override.
+
+### Added
+- Automatic link token: Tubarr creates a random 32-byte token on first start in the `trimarr-link` volume (in-memory,
+  owned by PUID:PGID, mounted only by Tubarr read-write and Trimarr read-only). Trimarr waits for it at start and
+  still refuses everything without a token. It's never logged or shown. No `openssl rand` step any more.
+
+### Upgrading from 0.1.0
+- Re-download `docker-compose.yml`, create `trimarr-data` (owned by PUID:PGID) and run `docker compose up -d`.
+  `TRIMARR_URL`/`TRIMARR_TOKEN` in `.env` can go; if you keep `TRIMARR_TOKEN`, it's still used.
+
 ## [0.1.0] - 2026-09-30
 
 First public release.

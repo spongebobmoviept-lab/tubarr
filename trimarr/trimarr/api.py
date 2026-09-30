@@ -2,8 +2,9 @@
 
 Security model: Trimarr has no published port and no users of its own. Only Tubarr talks to it, over the internal
 Docker network, through Tubarr's signed-in proxy (tubarr/webapp/addons.py). Every request except GET /health must
-carry the shared secret `X-Trimarr-Token` (env TRIMARR_TOKEN, set in both containers; at least 16 characters).
-Without a usable token the API refuses everything but /health (fails closed). The Host header must name an allowed
+carry the shared secret `X-Trimarr-Token`: the link token Tubarr creates automatically in the shared trimarr-link
+volume (/link/trimarr.token, read-only here), or TRIMARR_TOKEN when that is set in both containers (at least 16
+characters). Without a usable token the API refuses everything but /health (fails closed). The Host header must name an allowed
 host (trimarr, localhost, 127.0.0.1, plus TRIMARR_ALLOWED_HOSTS) as a DNS-rebinding defense. No CORS: browsers
 never call this API directly. Never returns tokens or secrets."""
 import hmac
@@ -166,7 +167,7 @@ def _patch_settings(m, q, body):
     except settings.SettingsError as e:
         raise ApiError(400, "bad_request", str(e)) from None
     if _SERVICE[0]:
-        _SERVICE[0].wake.set()
+        _SERVICE[0].wake.set()                   # switched on: the idle service starts its first pass right away
     return 200, new
 
 
@@ -261,8 +262,8 @@ def _post_pause(m, q, body):
 
 @route("POST", r"/api/resume")
 def _post_resume(m, q, body):
-    settings.update({"paused": False})
-    if _SERVICE[0]:
+    s = settings.update({"paused": False})
+    if _SERVICE[0] and s["enabled"]:              # while trimming is off, resuming starts nothing
         _SERVICE[0].request_pass()
     return 200, _status()
 
@@ -329,8 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse(421, "bad_host", "Trimarr doesn't answer to that host name.")
         if not (method == "GET" and path == "/health"):
             if not token_ok():
-                return self._refuse(503, "not_configured", "Trimarr's API is off: TRIMARR_TOKEN isn't set "
-                                    "(it must be at least %d characters, the same in Tubarr and Trimarr)."
+                return self._refuse(503, "not_configured", "Trimarr's API is off: there's no link token from "
+                                    "Tubarr yet (or TRIMARR_TOKEN is shorter than %d characters)."
                                     % config.MIN_TOKEN_LEN)
             if not auth_ok(self.headers.get("X-Trimarr-Token")):
                 return self._refuse(401, "unauthorized", "Missing or wrong X-Trimarr-Token.")
@@ -369,12 +370,33 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("PATCH")
 
 
+def wait_for_token(timeout=60, poll=1.0, stop=None):
+    """At start, give Tubarr a moment to create the link token. True once a usable token is there. Until then (and if
+    it never comes) the API refuses everything but /health; the token is read live, so a late one still works."""
+    deadline = time.monotonic() + timeout
+    waited = False
+    while not token_ok():
+        if time.monotonic() >= deadline or (stop is not None and stop.is_set()):
+            if config.token_source() == "TRIMARR_TOKEN":
+                log.error("TRIMARR_TOKEN is shorter than %d characters: the API refuses every request except /health. "
+                          "Use a longer one (the same for Tubarr and Trimarr), or remove it to use the automatic "
+                          "link.", config.MIN_TOKEN_LEN)
+            else:
+                log.error("No link token from Tubarr in %s: the API refuses every request except /health until "
+                          "Tubarr creates it (start both with the release's docker-compose.yml: docker compose up -d).",
+                          config.LINK_DIR)
+            return False
+        if not waited:
+            log.info("waiting for Tubarr's link token ...")
+            waited = True
+        time.sleep(poll)
+    log.info("linked with Tubarr (token from %s)", "TRIMARR_TOKEN" if config.token_source() == "TRIMARR_TOKEN"
+             else "the shared link volume")
+    return True
+
+
 def start(service):
     _SERVICE[0] = service
-    if not token_ok():
-        log.error("TRIMARR_TOKEN is not set or shorter than %d characters: the API refuses every request except "
-                  "/health until it is set (the same value in Tubarr's and Trimarr's environment).",
-                  config.MIN_TOKEN_LEN)
     srv = ThreadingHTTPServer((config.API_HOST, config.API_PORT), Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, name="api", daemon=True).start()

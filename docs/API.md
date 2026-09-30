@@ -9,7 +9,7 @@ working reference for every shape below: run the UI with `?mock=1` and watch wha
 Contents: [The real server](#the-real-server-v020) · [Conventions](#conventions) · [Live updates](#live-updates-server-sent-events) ·
 [How space is used](#how-space-is-used-fill-and-roll) · [States](#states) · [Objects](#objects) ·
 [Endpoints](#endpoints) · [Topics and series](#topics-and-series-plex-organization) ·
-[Trimarr (optional add-on)](#trimarr-optional-add-on-proxied) · [Serving the UI](#serving-the-ui)
+[Trimarr (ad trimmer)](#trimarr-ad-trimmer-proxied) · [Serving the UI](#serving-the-ui)
 
 ## Conventions
 
@@ -772,15 +772,15 @@ decides, per playlist); everything else is listed as ignored, with the reason.
   `{"enabled": true}` promotes it to a series anyway ("Use as a series anyway").
 - Changes are pushed to Plex; a `video.state` event follows for every video whose `series` changed.
 
-## Trimarr (optional add-on, proxied)
+## Trimarr (ad trimmer, proxied)
 
 Trimarr is a separate tool (another agent is building it; its own contract will be `trimarr/API.md`, which wins over
 this section). It trims sponsor segments out of videos **already in Plex** using SponsorBlock data. It ships **off**.
 The UI keeps it visually secondary.
 
 The UI never talks to Trimarr directly: the Tubarr backend proxies it under **`/api/trimarr/…`** (same origin, no
-CORS), with Trimarr's base URL in its own config. If Trimarr isn't configured, every `/api/trimarr/…` call returns
-404 `not_found`; if it's configured but down, 502. The UI then hides the per-video actions and shows "Trimarr isn't
+CORS), with Trimarr's base URL in its own config (`TRIMARR_URL`, default `http://trimarr:8791`; Trimarr starts with
+Tubarr). With `TRIMARR_URL=off`, every `/api/trimarr/…` call returns 404 `not_found`; if Trimarr is down, 502. The UI then hides the per-video actions and shows "Trimarr isn't
 installed" / "can't reach it". **All Trimarr routes the UI uses live in `web/js/trimarr.js`**, so matching the final
 Trimarr API means editing that one file (or mapping these routes in the proxy).
 
@@ -796,8 +796,8 @@ Trimarr API means editing that one file (or mapping these routes in the proxy).
 
 After a trim or undo, Tubarr should push a `video.state` event with the video's new `trim` value.
 
-Tubarr -> Trimarr: every request carries `X-Trimarr-Token` (`TRIMARR_TOKEN`, 16+ characters, the same for both
-containers), goes direct (no proxy environment variables) and never follows a redirect. Without a usable token the
+Tubarr -> Trimarr: every request carries `X-Trimarr-Token` (the link token Tubarr creates automatically in the shared
+`trimarr-link` volume, or `TRIMARR_TOKEN` when set: 16+ characters, the same for both containers), goes direct (no proxy environment variables) and never follows a redirect. Without a usable token the
 proxy answers 503 `not_configured` without calling Trimarr. Trimarr itself answers 401 without the right token, 421
 for a Host it doesn't know, and sends no CORS headers. Trimarr doesn't talk to Plex: Tubarr refreshes the item in
 Plex after each trim or undo (it polls Trimarr's `GET /api/videos?state=trimmed,undone&swapped_since=<epoch>`).

@@ -1,4 +1,4 @@
-/* Trim ads: what Trimarr (the optional add-on) is doing right now, what it has trimmed, what it would trim, and the
+/* Trim ads: what Trimarr (the ad trimmer, installed with Tubarr) is doing right now, what it has trimmed, what it would trim, and the
    originals it keeps so every trim can be undone. Everything comes from Trimarr's own API through Tubarr's proxy
    (/api/trimarr/raw/…, see trimarr/API.md). Trimarr has no event stream: this page polls every 4 s while it works,
    every 15 s otherwise. */
@@ -11,7 +11,7 @@
   const STEPS = ['planning', 'cutting', 'verifying', 'captions', 'swapping', 'plex'];
   const STEP_L = { starting: 'Starting', planning: 'Planning the cuts', cutting: 'Cutting', verifying: 'Verifying', captions: 'Shifting captions', swapping: 'Swapping the file in', plex: 'Updating Plex', restoring: 'Restoring the original' };
   const STEP_S = { planning: 'Plan', cutting: 'Cut', verifying: 'Verify', captions: 'Captions', swapping: 'Swap', plex: 'Plex' };
-  const STATE_L = { starting: 'Starting up', scanning: 'Scanning the library', checking: 'Checking SponsorBlock', trimming: 'Trimming', sleeping: 'Idle', stopped: 'Stopped', not_running: 'Not running' };
+  const STATE_L = { starting: 'Starting up', scanning: 'Scanning the library', checking: 'Checking SponsorBlock', trimming: 'Trimming', sleeping: 'Idle', off: 'Off', stopped: 'Stopped', not_running: 'Not running' };
   const CAT_L = { sponsor: 'sponsor', selfpromo: 'self-promo', interaction: 'like/subscribe', outro: 'end cards', preview: 'preview', filler: 'filler', music_offtopic: 'non-music', hook: 'hook' };
   const FOUND_SHOW = 25;
 
@@ -28,6 +28,7 @@
     if (w.current) return { key: w.state === 'checking' ? 'checking' : 'working', label: w.current.action === 'undo' ? 'Restoring an original' : w.current.action === 'check' ? 'Checking SponsorBlock' : 'Trimming' };
     if (s.paused) return { key: 'paused', label: 'Paused' };
     if (w.state === 'stopped' || w.state === 'not_running') return { key: 'stopped', label: 'Stopped' };
+    if (w.state === 'off') return { key: 'idle', label: 'Off: nothing runs until you switch automatic trimming on' };
     if (w.state === 'sleeping') return { key: 'idle', label: s.enabled ? 'Idle until the next pass' : 'Idle' };
     return { key: 'working', label: STATE_L[w.state] || w.state };
   }
@@ -185,7 +186,7 @@
     const gone = e.status === 404 || e.code === 'not_found';
     return ui.empty({
       icon: 'scissors', title: gone ? 'Trimarr isn’t installed' : 'Can’t reach Trimarr',
-      body: gone ? 'Trimarr is the optional add-on that cuts sponsor segments out of videos after they’re in Plex. Tubarr itself keeps every video exactly as uploaded.'
+      body: gone ? 'Trimarr is the ad trimmer that cuts sponsor segments out of videos after they’re in Plex. Tubarr itself keeps every video exactly as uploaded.'
         : (e.message || 'Trimarr didn’t answer.') + ' Tubarr keeps trying.',
       actions: gone ? '' : html`<button class="btn" type="button" data-act="tr-reload">${icon('refresh')}Try again</button>`,
     });

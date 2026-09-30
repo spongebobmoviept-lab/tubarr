@@ -9,4 +9,4 @@ Read-only by design:
 
 Run:  python -m tubarr.webapp            (port TUBARR_WEB_PORT, default 9194)
 """
-VERSION = "0.1.0"
+VERSION = "0.1.1"

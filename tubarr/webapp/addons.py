@@ -1,10 +1,11 @@
 """The optional Trimarr add-on, proxied under /api/trimarr/... (API.md "Trimarr"), plus Import preview (read-only).
 
-Trimarr: set TRIMARR_URL (e.g. http://trimarr:8791) and TRIMARR_TOKEN (a shared secret, at least 16 characters,
-the same value in Trimarr's environment) in Tubarr's .env to turn the proxy on. Without TRIMARR_URL every
-/api/trimarr/... call answers 404 not_found and the UI shows "Trimarr isn't installed". Trimarr is reached only over
-the internal Docker network; every call carries X-Trimarr-Token, ignores proxy environment variables and never
-follows redirects. The proxy translates Trimarr's own API (trimarr/trimarr/api.py) into the small shapes the UI's
+Trimarr ships with Tubarr (docker-compose.yml starts both) and is reached at TRIMARR_URL, default
+http://trimarr:8791; set TRIMARR_URL=off to hide it (every /api/trimarr/... call then answers 404 not_found and the
+UI shows "Trimarr isn't installed"). The shared secret is created automatically (tubarr/trimlink.py: a random token
+in the shared trimarr-link volume); TRIMARR_TOKEN in the environment overrides it. Trimarr is reached only over the
+internal Docker network; every call carries X-Trimarr-Token, ignores proxy environment variables and never follows
+redirects. The proxy translates Trimarr's own API (trimarr/trimarr/api.py) into the small shapes the UI's
 web/js/trimarr.js expects.
 
 Trimarr holds no Plex credentials. After it replaces a file (trim or undo) the trim poller below asks Plex, with
@@ -23,7 +24,7 @@ from urllib.parse import quote
 
 import requests
 
-from .. import config, plexhttp, redact
+from .. import config, plexhttp, redact, trimlink
 from . import store
 
 log = logging.getLogger("tubarr.webapp.addons")
@@ -35,12 +36,31 @@ class ProxyError(Exception):
         self.status, self.code, self.message = status, code, message
 
 
-TRIMARR_URL = (os.environ.get("TRIMARR_URL") or "").rstrip("/")
-TRIMARR_TOKEN = (os.environ.get("TRIMARR_TOKEN") or "").strip()
+DEFAULT_TRIMARR_URL = "http://trimarr:8791"
+
+
+def _trimarr_url(env):
+    """TRIMARR_URL, default http://trimarr:8791 (the compose service); empty, "off", "none" or "0" = no Trimarr."""
+    v = env.get("TRIMARR_URL")
+    v = DEFAULT_TRIMARR_URL if v is None else v.strip()
+    return "" if v.lower() in ("", "off", "none", "0", "false", "no") else v.rstrip("/")
+
+
+TRIMARR_URL = _trimarr_url(os.environ)
+TRIMARR_TOKEN = (os.environ.get("TRIMARR_TOKEN") or "").strip()     # optional override; normally the link file
 MIN_TOKEN_LEN = 16
 VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 RATING_KEY = re.compile(r"\d{1,12}")
 redact.remember(TRIMARR_TOKEN)        # never in logs or error messages
+
+
+def _token():
+    """The token Tubarr sends: TRIMARR_TOKEN if set (it wins), else the auto-created link token (made if missing)."""
+    if TRIMARR_TOKEN:
+        return TRIMARR_TOKEN
+    tok = trimlink.ensure_token()
+    redact.remember(tok)
+    return tok
 
 _SESSION = requests.Session()
 _SESSION.trust_env = False            # never route Tubarr -> Trimarr through HTTP(S)_PROXY / .netrc
@@ -50,12 +70,17 @@ def _call(method, path, timeout, **kw):
     """One request to Trimarr (token header, no proxies, no redirects) -> (status, json body)."""
     if not TRIMARR_URL:
         raise ProxyError(404, "not_found", "Trimarr isn't installed.")
-    if len(TRIMARR_TOKEN) < MIN_TOKEN_LEN:
-        raise ProxyError(503, "not_configured", "Set TRIMARR_TOKEN (at least %d characters, the same value for Tubarr "
-                         "and Trimarr) in .env, then recreate both containers." % MIN_TOKEN_LEN)
+    token = _token()
+    if len(token) < MIN_TOKEN_LEN:
+        if TRIMARR_TOKEN:
+            raise ProxyError(503, "not_configured", "TRIMARR_TOKEN is too short: use at least %d characters (the same "
+                             "value for Tubarr and Trimarr), or remove it to use the automatic link." % MIN_TOKEN_LEN)
+        raise ProxyError(503, "not_configured", "Tubarr couldn't create the Trimarr link token: the shared trimarr-link "
+                         "volume isn't mounted at %s or isn't writable. Use the docker-compose.yml from the release, "
+                         "then run: docker compose up -d" % trimlink.LINK_DIR)
     try:
         r = _SESSION.request(method, TRIMARR_URL + path, timeout=timeout, allow_redirects=False,
-                             headers={"X-Trimarr-Token": TRIMARR_TOKEN}, **kw)
+                             headers={"X-Trimarr-Token": token}, **kw)
     except requests.RequestException:
         raise ProxyError(502, "internal", "Tubarr can't reach Trimarr.") from None
     try:
@@ -236,9 +261,13 @@ class _TrimIndex:
     def start(self):
         if TRIMARR_URL and not self.started:
             self.started = True
-            if len(TRIMARR_TOKEN) < MIN_TOKEN_LEN:
-                log.error("TRIMARR_URL is set but TRIMARR_TOKEN is missing or shorter than %d characters: Trimarr "
-                          "will refuse Tubarr's requests until the same token is set for both.", MIN_TOKEN_LEN)
+            if TRIMARR_TOKEN and len(TRIMARR_TOKEN) < MIN_TOKEN_LEN:
+                log.error("TRIMARR_TOKEN is shorter than %d characters: Trimarr will refuse Tubarr's requests. Use a "
+                          "longer one (the same for both containers), or remove it to use the automatic link.",
+                          MIN_TOKEN_LEN)
+            elif not TRIMARR_TOKEN and not _token():
+                log.info("No Trimarr link folder at %s (running without the compose file's trimarr-link volume): "
+                         "the Trim ads page stays unavailable.", trimlink.LINK_DIR)
             threading.Thread(target=self.loop, name="trim-index", daemon=True).start()
 
     def poke(self):

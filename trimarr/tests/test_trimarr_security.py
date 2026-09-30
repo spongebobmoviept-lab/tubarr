@@ -9,17 +9,20 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import unittest
+from unittest import mock
 
 _TMP = tempfile.mkdtemp(prefix="trimarr-test-")
 os.environ["TRIMARR_DATA"] = os.path.join(_TMP, "data")
 os.environ["TRIMARR_ROOT"] = os.path.join(_TMP, "youtube")
+os.environ["TRIMARR_LINK_DIR"] = os.path.join(_TMP, "link")      # the shared link volume (empty unless a test fills it)
 os.makedirs(os.environ["TRIMARR_ROOT"], exist_ok=True)
 os.environ.pop("TRIMARR_ALLOWED_HOSTS", None)
 
 from http.server import ThreadingHTTPServer  # noqa: E402
 
-from trimarr import api, library, planner, settings, sponsorblock, trimmer  # noqa: E402
+from trimarr import api, config, library, planner, service, settings, sponsorblock, trimmer  # noqa: E402
 
 TOKEN = "t0k3n-for-tests-0123456789abcdef"
 
@@ -274,6 +277,181 @@ class VideoIds(unittest.TestCase):
         with self.assertRaises(trimmer.Skip):
             trimmer.trim("../../evil")
         self.assertEqual(os.path.exists(os.path.join(os.environ["TRIMARR_ROOT"], ".trim-work")), before)
+
+
+# ------------------------------------------------------------------ the automatic link token (shared volume)
+class LinkToken(unittest.TestCase):
+    """Trimarr reads the token Tubarr created in /link when TRIMARR_TOKEN isn't set; TRIMARR_TOKEN wins."""
+    LINK = "L1nk-" + "a" * 64
+    setUpClass = classmethod(ApiSecurity.setUpClass.__func__)
+    tearDownClass = classmethod(ApiSecurity.tearDownClass.__func__)
+    req = ApiSecurity.req
+
+    def setUp(self):
+        ApiSecurity.setUp(self)
+        os.environ.pop("TRIMARR_TOKEN", None)
+        self.link = tempfile.mkdtemp(prefix="link-", dir=_TMP)
+        self._p = mock.patch.object(config, "LINK_DIR", self.link)
+        self._p.start()
+
+    def tearDown(self):
+        self._p.stop()
+        shutil.rmtree(self.link, ignore_errors=True)
+        ApiSecurity.tearDown(self)
+
+    def write(self, value):
+        with open(os.path.join(self.link, config.LINK_TOKEN), "w") as f:
+            f.write(value + "\n")
+
+    def test_reads_the_token_from_the_link_file(self):
+        self.write(self.LINK)
+        self.assertEqual(config.api_token(), self.LINK)
+        st, _, body = self.req("GET", "/api/status", token=self.LINK)
+        self.assertEqual(st, 200)
+        self.assertNotIn(self.LINK, json.dumps(body))
+        st, _, _ = self.req("GET", "/api/status", token="wrong-" + "b" * 40)
+        self.assertEqual(st, 401)
+
+    def test_fails_closed_without_a_token(self):
+        self.assertEqual(config.api_token(), "")
+        st, _, body = self.req("GET", "/api/status", token="anything-anything-anything")
+        self.assertEqual(st, 503)
+        self.assertEqual(body["error"]["code"], "not_configured")
+        st, _, _ = self.req("GET", "/api/status", token="")
+        self.assertEqual(st, 503)
+        self.assertEqual(self.req("GET", "/health")[0], 200)
+
+    def test_unusable_link_files_fail_closed(self):
+        for bad in ("", "short", "has spaces in the middle of it ok", "x" * 600):
+            self.write(bad)
+            self.assertEqual(config.api_token(), "", bad)
+            self.assertEqual(self.req("GET", "/api/status", token=bad or "z" * 20)[0], 503)
+
+    def test_symlinked_token_file_is_not_followed(self):
+        other = os.path.join(self.link, "elsewhere")
+        with open(other, "w") as f:
+            f.write(self.LINK)
+        os.symlink(other, os.path.join(self.link, config.LINK_TOKEN))
+        self.assertEqual(config.api_token(), "")
+
+    def test_env_override_wins(self):
+        self.write(self.LINK)
+        os.environ["TRIMARR_TOKEN"] = TOKEN
+        self.assertEqual(config.api_token(), TOKEN)
+        self.assertEqual(self.req("GET", "/api/status", token=TOKEN)[0], 200)
+        self.assertEqual(self.req("GET", "/api/status", token=self.LINK)[0], 401)
+        os.environ["TRIMARR_TOKEN"] = "short-token"      # a bad override is not silently replaced by the file
+        self.assertEqual(self.req("GET", "/api/status", token=self.LINK)[0], 503)
+
+    def test_token_is_read_live(self):
+        self.assertEqual(self.req("GET", "/api/status", token=self.LINK)[0], 503)
+        self.write(self.LINK)
+        self.assertEqual(self.req("GET", "/api/status", token=self.LINK)[0], 200)
+
+    def test_waits_for_the_token_at_start(self):
+        threading.Timer(0.3, self.write, args=(self.LINK,)).start()
+        t0 = time.monotonic()
+        self.assertTrue(api.wait_for_token(timeout=10, poll=0.05))
+        self.assertLess(time.monotonic() - t0, 5)
+
+    def test_gives_up_waiting_and_stays_closed(self):
+        with self.assertLogs("trimarr.api", "ERROR") as cm:
+            self.assertFalse(api.wait_for_token(timeout=0.2, poll=0.05))
+        self.assertFalse(api.token_ok())
+        self.assertNotIn(self.LINK, " ".join(cm.output))
+
+    def test_token_never_logged(self):
+        self.write(self.LINK)
+        with self.assertLogs("trimarr.api", "INFO") as cm:
+            self.assertTrue(api.wait_for_token(timeout=1, poll=0.05))
+        self.assertNotIn(self.LINK, " ".join(cm.output))
+
+
+# ------------------------------------------------------------------ off = idle: nothing happens on its own
+class IdleWhileOff(unittest.TestCase):
+    def setUp(self):
+        settings.update({"enabled": False, "paused": False})
+        self.video = os.path.join(config.ROOT, "Some Channel", "Season 2026", "clip [abcdefghijk].mkv")
+        os.makedirs(os.path.dirname(self.video), exist_ok=True)
+        with open(self.video, "wb") as f:
+            f.write(b"not really a video")
+        self.before = self.snapshot()
+        self.patches = [mock.patch.object(sponsorblock.requests, "get", side_effect=AssertionError("network")),
+                        mock.patch.object(sponsorblock, "fetch", side_effect=AssertionError("SponsorBlock")),
+                        mock.patch.object(trimmer, "sync_library", side_effect=AssertionError("scan")),
+                        mock.patch.object(trimmer, "check", side_effect=AssertionError("check")),
+                        mock.patch.object(trimmer, "housekeeping", side_effect=AssertionError("housekeeping")),
+                        mock.patch.object(service.signal, "signal"),
+                        mock.patch.object(service.api, "start"),
+                        mock.patch.object(service.api, "wait_for_token", return_value=True)]
+        self.mocks = [p.start() for p in self.patches]
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        settings.update({"enabled": False, "paused": False})
+
+    @staticmethod
+    def snapshot():
+        out = {}
+        for dp, dns, fns in os.walk(config.ROOT):
+            for n in dns + fns:
+                p = os.path.join(dp, n)
+                st = os.stat(p)
+                out[p] = (st.st_size, st.st_mtime_ns)
+        return out
+
+    def run_service(self):
+        svc = service.Service()
+        th = threading.Thread(target=svc.run_forever, daemon=True)
+        th.start()
+        return svc, th
+
+    def stop(self, svc, th):
+        svc.stop.set()
+        svc.wake.set()
+        th.join(5)
+        self.assertFalse(th.is_alive())
+
+    def test_idle_while_off_does_nothing(self):
+        svc, th = self.run_service()
+        with mock.patch.object(service.Service, "run_pass", side_effect=AssertionError("pass")) as rp:
+            time.sleep(0.6)
+            svc.wake.set()                               # a wake-up (e.g. an API call) still starts nothing
+            time.sleep(0.3)
+            self.assertEqual(svc.state, "off")
+            self.assertIsNone(svc.next_pass_at)
+            self.stop(svc, th)
+            rp.assert_not_called()
+        for m in self.mocks[:5]:
+            m.assert_not_called()
+        self.assertEqual(self.snapshot(), self.before)   # no file changed, no .trim-work / .trim-originals
+        self.assertFalse(os.path.exists(config.WORK))
+        self.assertFalse(os.path.exists(config.ORIGINALS))
+
+    def test_resume_while_off_starts_nothing(self):
+        svc = service.Service()
+        api._SERVICE[0] = svc
+        try:
+            api._post_resume(None, {}, None)
+        finally:
+            api._SERVICE[0] = None
+        self.assertFalse(svc.pass_requested)
+        self.assertFalse(svc.active())
+
+    def test_switching_on_starts_a_pass(self):
+        started = threading.Event()
+        svc, th = self.run_service()
+        with mock.patch.object(service.Service, "run_pass", side_effect=lambda: started.set()):
+            time.sleep(0.3)
+            self.assertFalse(started.is_set())
+            api._SERVICE[0] = svc
+            try:
+                api._patch_settings(None, {}, {"enabled": True})      # what Tubarr's switch sends
+            finally:
+                api._SERVICE[0] = None
+            self.assertTrue(started.wait(5))
+            self.stop(svc, th)
 
 
 if __name__ == "__main__":

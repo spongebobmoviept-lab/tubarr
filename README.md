@@ -29,7 +29,7 @@ Tubarr is a self-hosted "arr" for YouTube. You give it the channels you follow; 
 - **English subtitles.** The creator's own subtitles, or YouTube's auto-captions cleaned into a proper SRT.
 - **Proxies with failover.** Optional proxies for YouTube traffic with Direct, One proxy, Failover and Rotate modes, and a leak guard that pauses rather than fall back to your own connection.
 - **Secure by default.** Admin sign-in, an argon2id password hash, CSRF protection, a read-only API key, and encrypted credentials. It runs as a non-root user with a read-only root filesystem.
-- **Optional ad trimming.** The Trimarr add-on removes SponsorBlock sponsor segments from videos already in your library (off until you turn it on, and undoable).
+- **Ad trimming, built in.** Trimarr, which installs with Tubarr, removes SponsorBlock sponsor segments from videos already in your library (off until you turn it on, and undoable).
 - **No AI rewriting.** Titles and descriptions are the creator's own, cleaned by simple rules only.
 
 ## Screenshots
@@ -77,15 +77,17 @@ No need to clone the repo or build anything: two files are enough.
 
 ```bash
 mkdir tubarr && cd tubarr
-curl -fsSLO https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.0/docker-compose.yml
-curl -fsSL -o .env https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.0/.env.example
+curl -fsSLO https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.1/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/spongebobmoviept-lab/tubarr/v0.1.1/.env.example
 # edit .env: YOUTUBE_DIR (where videos go), PUID/PGID, TZ
-mkdir -p data && sudo chown -R 1000:1000 data "$YOUTUBE_DIR"   # match PUID:PGID
-docker compose up -d          # downloads the ready-made image, nothing to build
+mkdir -p data trimarr-data && sudo chown -R 1000:1000 data trimarr-data "$YOUTUBE_DIR"   # match PUID:PGID
+docker compose up -d          # downloads the ready-made images, nothing to build
 docker compose logs tubarr | grep "Setup code"
 ```
 
-Images for amd64 and arm64 (e.g. Raspberry Pi 4/5) are published at `ghcr.io/spongebobmoviept-lab/tubarr`. To build from source instead, uncomment `build:` in `docker-compose.yml` (it builds straight from this GitHub repo) and run `docker compose up -d --build`. Portainer/Dockge users can paste `docker-compose.yml` as a stack and set `YOUTUBE_DIR` in its environment.
+That one `docker compose up -d` starts everything: Tubarr, its PO-token helper and the Trimarr ad trimmer. Tubarr and Trimarr link themselves with a random token Tubarr creates on its first start, so there's no secret to generate or paste. Trimarr stays idle until you switch trimming on (see [Trimarr](#trimarr-ad-trimmer)).
+
+Images for amd64 and arm64 (e.g. Raspberry Pi 4/5) are published at `ghcr.io/spongebobmoviept-lab/tubarr` and `ghcr.io/spongebobmoviept-lab/trimarr`. To build from source instead, uncomment `build:` in `docker-compose.yml` (it builds straight from this GitHub repo) and run `docker compose up -d --build`. Portainer/Dockge users can paste `docker-compose.yml` as a stack and set `YOUTUBE_DIR` in its environment.
 
 By default the web UI is published on `127.0.0.1:9194`, this host only (see [Remote access](#remote-access) before
 opening it to your network). Open `http://localhost:9194` (or an SSH tunnel to it) and follow the setup:
@@ -145,8 +147,9 @@ Set these in `.env` (see [.env.example](.env.example) for the full, commented li
 | `TUBARR_ALLOW_ROOT` | (empty) | The container refuses to run as root; `1` overrides that (not recommended). |
 | `TUBARR_ADMIN_USER` / `TUBARR_ADMIN_PASSWORD_HASH` | (empty) | Unattended installs: seed the admin from an argon2id **hash** (see [Security](#security)). |
 | `PLEX_URL` / `PLEX_SECTION` / `PLEX_ROOT` | (setup) | Normally set by the setup. `PLEX_ROOT` = the media folder as Plex sees it. The Plex **token** is never an env var. |
-| `TRIMARR_URL` | (empty) | `http://trimarr:8791` when you run the Trimarr add-on. |
-| `TRIMARR_TOKEN` | (empty) | Shared secret for Tubarr ↔ Trimarr (16+ characters, e.g. `openssl rand -hex 32`). Required for Trimarr. |
+| `TRIMARR_URL` | `http://trimarr:8791` | Where Tubarr finds Trimarr. `off` hides Trimarr (if you removed it from the compose file). |
+| `TRIMARR_TOKEN` | (empty) | Optional. Overrides the automatic Tubarr ↔ Trimarr link token (16+ characters, the same for both). Not needed normally. |
+| `TRIMARR_DATA_DIR` | `./trimarr-data` | Host folder for Trimarr's own database, settings and logs. |
 
 ## Proxies and VPNs
 
@@ -173,7 +176,7 @@ YouTube rate-limits and sometimes flags addresses that download a lot. **The bes
 - **API key** (Settings → Account): for scripts and monitors, sent as the `X-Api-Key` header, never in a URL. It is **read-only** (GET requests only) and can't see proxy details, your public IP, the webhook, the account, the security log or the channel lookup. It's shown once; Tubarr keeps only a SHA-256 hash of it.
 - **Credentials at rest.** The Plex token, proxy addresses and the Discord webhook link are encrypted (Fernet) with a random per-install key, `/data/secret.key` (mode 600). They are never sent back to the browser (the webhook field is write-only) and are scrubbed from logs. The Plex token is the chosen server's own token (not your plex.tv account token), and it's deleted if you point Tubarr at a different Plex address; Plex requests never follow redirects.
 - **Security log.** Settings → Account lists sign-ins, password and API key changes, Plex changes, and every network change and automatic line switch (never credentials).
-- **Containers.** Tubarr, Trimarr and the PO-token helper run as non-root users (Tubarr refuses to start as root) with a read-only root filesystem, all capabilities dropped, `no-new-privileges` and memory/process limits. No Docker socket, no privileged mode, no host networking. The data folder is kept at mode 700. Each helper sits on its own internal network with Tubarr: the PO-token helper and Trimarr can't reach each other, and neither publishes a port. Trimarr only answers requests that carry the shared `TRIMARR_TOKEN`.
+- **Containers.** Tubarr, Trimarr and the PO-token helper run as non-root users (Tubarr refuses to start as root) with a read-only root filesystem, all capabilities dropped, `no-new-privileges` and memory/process limits. No Docker socket, no privileged mode, no host networking. The data folder is kept at mode 700. Each helper sits on its own internal network with Tubarr: the PO-token helper and Trimarr can't reach each other, and neither publishes a port. Trimarr only answers requests that carry the link token, which Tubarr creates automatically in a small in-memory volume that only these two containers mount (Trimarr read-only).
 - **Supply chain.** Python dependencies are pinned with sha256 hashes and installed wheels-only (`--require-hashes`); base images are pinned by digest; poster fonts are vendored in `docker/fonts/`; GitHub Actions are pinned to commit SHAs. Release images are published only after CI passes and carry a signed build-provenance attestation (`gh attestation verify oci://ghcr.io/spongebobmoviept-lab/tubarr:<version> --owner spongebobmoviept-lab`).
 
 **Forgot the password?**
@@ -197,21 +200,15 @@ The compose file publishes the web UI on `127.0.0.1:9194` (this host only). For 
 
 For access from outside, put Tubarr behind a reverse proxy with HTTPS, for example Caddy (`reverse_proxy tubarr:9194`), Traefik or nginx, ideally on a **dedicated hostname** (e.g. `tubarr.example.com`, not a path on a site shared with other apps: cookies and the browser's same-origin rules are per host), or use a VPN such as WireGuard or Tailscale. Set `TUBARR_TRUSTED_PROXIES` to the proxy's address (e.g. `172.18.0.5` or `172.18.0.0/16`) so sign-in throttling and the security log see the real client address; without it, `X-Forwarded-For` is ignored and every remote client shares the proxy's address. Cookies become Secure (and `__Host-` prefixed) automatically when the connection is HTTPS.
 
-## Trimarr (optional ad trimmer)
+## Trimarr (ad trimmer)
 
-Trimarr is a separate, small container that removes SponsorBlock-labelled **sponsor** and **self-promotion** segments from videos already in your library. It works in place (same file, so the Plex item and watch state stay), cuts on keyframes without re-encoding, verifies the result before replacing anything, shifts subtitles and chapters to match, and keeps the original for undo (7 days by default). Only SponsorBlock segments that are locked, or have at least one vote and are at least 24 hours old, are cut. Trimarr holds no Plex credentials: Tubarr refreshes Plex after each trim or undo with its own token.
+Trimarr installs and starts with Tubarr. It's a separate, small container (kept apart from Tubarr on purpose, for security) that removes SponsorBlock-labelled **sponsor** and **self-promotion** segments from videos already in your library. It works in place (same file, so the Plex item and watch state stay), cuts on keyframes without re-encoding, verifies the result before replacing anything, shifts subtitles and chapters to match, and keeps the original for undo (7 days by default). Only SponsorBlock segments that are locked, or have at least one vote and are at least 24 hours old, are cut. Trimarr holds no Plex credentials: Tubarr refreshes Plex after each trim or undo with its own token.
 
-```bash
-# in .env: TRIMARR_URL=http://trimarr:8791 and TRIMARR_TOKEN=<openssl rand -hex 32>
-mkdir -p trimarr-data && sudo chown 1000:1000 trimarr-data
-docker compose --profile trimarr up -d
-```
-
-Then switch it on in Tubarr: **Settings → Trim ads** (it ships off). See [trimarr/README.md](trimarr/README.md).
+There's nothing to install or configure: switch it on in Tubarr, **Settings → Trim ads** (it ships off). Until then it's idle: no library scan, no SponsorBlock requests, no file changes. See [trimarr/README.md](trimarr/README.md).
 
 ## Updating
 
-- **Tubarr:** change the image tag in `docker-compose.yml` to the new release (or re-download the file), then `docker compose pull && docker compose up -d`.
+- **Tubarr and Trimarr:** change both image tags in `docker-compose.yml` to the new release (or re-download the file), then `docker compose pull && docker compose up -d`. Coming from 0.1.0: re-download `docker-compose.yml` (Trimarr is no longer behind `--profile trimarr`), create the `trimarr-data` folder as in the [Quick start](#quick-start), and remove `TRIMARR_URL`/`TRIMARR_TOKEN` from `.env` unless you want to keep your own token.
 - **yt-dlp** has to keep up with YouTube. The image ships a pinned, hash-verified yt-dlp; update it by pulling a newer Tubarr image. Optional: `TUBARR_YTDLP_AUTOUPDATE=1` fetches the newest yt-dlp release from PyPI at every container start (wheels only, into an in-memory folder, never the data folder, so nothing downloaded survives a restart). That code isn't hash-pinned: turning it on means trusting PyPI and yt-dlp's release process at every start, which is why it's off by default. If PyPI can't be reached, the image's version is used. A `.pylib` folder in the data folder from an older version is no longer used and can be deleted. yt-dlp only loads plugins from the image itself, never from the data folder.
 - **PO-token helper:** it's pinned by digest in `docker-compose.yml`. When you update it, also bump `bgutil-ytdlp-pot-provider` in `requirements.txt` to the matching version and rebuild.
 
@@ -248,7 +245,7 @@ docker build -t tubarr:local .
 docker run --rm --network none -e TUBARR_DATA=/tmp/d -e TUBARR_ROOT=/tmp/y -v "$PWD/tests:/app/tests:ro" \
   --entrypoint python tubarr:local -m unittest discover -s tests -v
 docker build -t trimarr:local ./trimarr
-docker run --rm --network none -e TRIMARR_TOKEN=test-token-0123456789abcdef -v "$PWD/trimarr/tests:/app/tests:ro" \
+docker run --rm --network none -v "$PWD/trimarr/tests:/app/tests:ro" \
   --entrypoint python trimarr:local -m unittest discover -s tests -v
 ```
 

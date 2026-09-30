@@ -1,5 +1,6 @@
 """Fixed paths and endpoints (from the environment). Adjustable settings live in settings.py."""
 import os
+import re
 
 from . import __version__ as VERSION
 
@@ -27,9 +28,37 @@ MIN_TOKEN_LEN = 16
 DEFAULT_ALLOWED_HOSTS = ("trimarr", "localhost", "127.0.0.1")
 
 
+LINK_DIR = os.environ.get("TRIMARR_LINK_DIR", "/link")         # shared with Tubarr (read-only here), see below
+LINK_TOKEN = "trimarr.token"
+_TOKEN_RE = re.compile(r"[!-~]{%d,512}" % MIN_TOKEN_LEN)
+
+
+def link_token():
+    """The token Tubarr created in the shared trimarr-link volume (/link/trimarr.token), or ''."""
+    try:
+        fd = os.open(os.path.join(LINK_DIR, LINK_TOKEN), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return ""
+    try:
+        raw = os.read(fd, 520)
+    except OSError:
+        return ""
+    finally:
+        os.close(fd)
+    tok = raw.decode("ascii", "replace").strip()
+    return tok if _TOKEN_RE.fullmatch(tok) else ""
+
+
 def api_token():
-    """The shared secret Tubarr sends as X-Trimarr-Token (read live; never logged or returned)."""
-    return (os.environ.get("TRIMARR_TOKEN") or "").strip()
+    """The shared secret Tubarr sends as X-Trimarr-Token: TRIMARR_TOKEN if set (an override for advanced setups),
+    otherwise the link token Tubarr creates automatically. Read live, so a token that appears (or changes) after
+    start is picked up without a restart. Never logged or returned."""
+    env = (os.environ.get("TRIMARR_TOKEN") or "").strip()
+    return env if env else link_token()
+
+
+def token_source():
+    return "TRIMARR_TOKEN" if (os.environ.get("TRIMARR_TOKEN") or "").strip() else "link"
 
 
 def allowed_hosts():

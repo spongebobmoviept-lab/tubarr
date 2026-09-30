@@ -1,6 +1,8 @@
 # Tubarr: YouTube subscriptions -> Plex. Copy .env.example to .env, set YOUTUBE_DIR (and PUID/PGID), then:
-#   docker compose up -d --build          (Tubarr + the PO-token helper)
-#   docker compose --profile trimarr up -d --build   (also the optional ad trimmer; needs TRIMARR_TOKEN in .env)
+#   docker compose up -d
+# That starts Tubarr, its PO-token helper and the Trimarr ad trimmer (idle until you switch trimming on in Tubarr:
+# Settings -> Trim ads). Tubarr and Trimarr link themselves: Tubarr creates a random shared token on first start in
+# the small "trimarr-link" volume below, which only these two containers mount. Nothing to generate or paste.
 # Open http://127.0.0.1:9194 on this host (or see "ports" below for LAN access) and follow the first-run setup. The
 # setup code is in: docker compose logs tubarr
 #
@@ -11,8 +13,8 @@
 # (README -> "Remote access").
 services:
   tubarr:
-    image: ghcr.io/spongebobmoviept-lab/tubarr:0.1.0   # ready-made image (amd64 + arm64)
-    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.0   # build from source instead (no clone needed): uncomment, then `docker compose up -d --build`
+    image: ghcr.io/spongebobmoviept-lab/tubarr:0.1.1   # ready-made image (amd64 + arm64)
+    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.1   # build from source instead (no clone needed): uncomment, then `docker compose up -d --build`
     container_name: tubarr
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"      # the image refuses to run as root (uid 0)
@@ -21,7 +23,7 @@ services:
         required: false                       # settings can also live in this file's environment: block
     environment:
       - TZ=${TZ:-UTC}
-      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # only used with the trimarr profile (the same value goes to Trimarr)
+      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # optional override of the automatic link token (same value for Trimarr)
     ports:
       # Web UI + API, reachable only from this host by default. Published Docker ports BYPASS the host firewall
       # (ufw/firewalld never see them), so opening it to the LAN makes it reachable by every device that can reach
@@ -32,6 +34,10 @@ services:
     volumes:
       - ${YOUTUBE_DIR:?set YOUTUBE_DIR in .env}:/youtube   # the library (Plex reads the same folder)
       - ${TUBARR_DATA_DIR:-./data}:/data                    # database, settings, encrypted credentials, logs (kept mode 700)
+      - type: volume                                         # Tubarr <-> Trimarr link token (Tubarr writes it)
+        source: trimarr-link
+        target: /link
+        volume: {nocopy: true}
     read_only: true
     tmpfs:
       - /tmp                                 # also holds the optional yt-dlp auto-update (TUBARR_YTDLP_AUTOUPDATE=1)
@@ -73,25 +79,30 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
 
-  # Optional: Trimarr cuts SponsorBlock "sponsor" and "self-promotion" segments out of videos already in the library
-  # (off until you switch it on in Tubarr: Settings -> Trim ads). Enable with --profile trimarr and set in .env:
-  # TRIMARR_URL=http://trimarr:8791 and TRIMARR_TOKEN (see .env.example). No published port: you use it through
-  # Tubarr's signed-in UI, and its API answers only requests carrying TRIMARR_TOKEN. It doesn't talk to Plex:
-  # Tubarr refreshes Plex after a trim. Its own egress network is only for the SponsorBlock API.
+  # Trimarr cuts SponsorBlock "sponsor" and "self-promotion" segments out of videos already in the library. It ships
+  # OFF and stays idle (no library scan, no SponsorBlock request, no file changes) until you switch trimming on in
+  # Tubarr: Settings -> Trim ads. Tubarr finds it at http://trimarr:8791 (set TRIMARR_URL=off in .env to hide it).
+  # No published port: you use it through Tubarr's signed-in UI, and its API answers only requests carrying the link
+  # token from the trimarr-link volume (read-only here). It doesn't talk to Plex: Tubarr refreshes Plex after a trim.
+  # Its own egress network is only for the SponsorBlock API.
   trimarr:
-    profiles: ["trimarr"]
-    image: ghcr.io/spongebobmoviept-lab/trimarr:0.1.0  # ready-made image (amd64 + arm64)
-    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.0:trimarr   # build from source instead
+    image: ghcr.io/spongebobmoviept-lab/trimarr:0.1.1  # ready-made image (amd64 + arm64)
+    # build: https://github.com/spongebobmoviept-lab/tubarr.git#v0.1.1:trimarr   # build from source instead
     container_name: trimarr
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       - TZ=${TZ:-UTC}
-      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # required (16+ characters); without it Trimarr's API refuses everything
+      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # optional override (16+ characters); normally the link token is used
       - PLEX_ROOT=${PLEX_ROOT:-}             # the library path as Plex sees it, if different from /youtube
     volumes:
       - ${YOUTUBE_DIR:?set YOUTUBE_DIR in .env}:/youtube
       - ${TRIMARR_DATA_DIR:-./trimarr-data}:/data
+      - type: volume                         # the link token, read-only: Trimarr can't change it
+        source: trimarr-link
+        target: /link
+        read_only: true
+        volume: {nocopy: true}
     read_only: true
     tmpfs:
       - /tmp
@@ -142,6 +153,17 @@ networks:
     internal: true
     # ipam: {config: [{subnet: 172.29.95.0/24}]}      # fixed subnet: only needed with gluetun (see above)
   trim-egress: {}
+
+# The Tubarr <-> Trimarr link: a tiny in-memory (tmpfs) volume, owned by PUID:PGID with mode 750, so the token never
+# touches the disk and no other user can read it. Tubarr writes /link/trimarr.token (mode 640) on its first start;
+# Trimarr only reads it. While either container runs, the token stays the same; after both stop, the next start
+# simply makes a new one. If you change PUID/PGID later: docker compose down && docker volume rm <project>_trimarr-link
+volumes:
+  trimarr-link:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=64k,mode=0750,uid=${PUID:-1000},gid=${PGID:-1000}"
 #
 # secrets:
 #   wireguard_private_key:

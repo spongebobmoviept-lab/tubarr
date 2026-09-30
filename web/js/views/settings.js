@@ -461,12 +461,12 @@
     n.addEventListener('change', (e) => { if (e.target.dataset.ev) { draft.notifications.events[e.target.dataset.ev] = e.target.checked; renderSaveBar(); } });
   }
 
-  /* ---------- Trim ads (optional Trimarr add-on) ---------- */
+  /* ---------- Trim ads (Trimarr, installed with Tubarr) ---------- */
   function trimCard() {
     const s = T.trimarr.status || {};
     if (!s.available) {
       return html`<div class="trim-card is-missing"><div class="trim-head"><span class="trim-ic">${icon('scissors')}</span><div>
-        <h3>Trimarr isn’t installed</h3><p>${s.reason === 'unreachable' ? 'Tubarr can’t reach it right now. ' : ''}Trimarr is an optional add-on that trims sponsor segments out of videos that are already in Plex. Tubarr itself keeps every video exactly as uploaded.</p></div></div></div>`;
+        <h3>${s.reason === 'unreachable' ? 'Can’t reach Trimarr' : 'Trimarr isn’t installed'}</h3><p>${s.reason === 'unreachable' ? 'Tubarr can’t reach it right now; it starts with Tubarr’s docker-compose.yml (docker compose up -d). ' : ''}Trimarr is the ad trimmer that trims sponsor segments out of videos that are already in Plex. Tubarr itself keeps every video exactly as uploaded.</p></div></div></div>`;
     }
     return html`<div class="trim-card ${s.enabled ? 'is-on' : 'is-off'}">
       <div class="trim-head"><span class="trim-ic">${icon('scissors')}</span>

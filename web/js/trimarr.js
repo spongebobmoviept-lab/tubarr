@@ -1,4 +1,4 @@
-/* Tubarr web UI: the optional Trimarr add-on (trims sponsor segments out of videos already in Plex).
+/* Tubarr web UI: the Trimarr ad trimmer (installed with Tubarr; trims sponsor segments out of videos already in Plex).
    Every call goes through Tubarr's same-origin proxy, /api/trimarr/…, described in API.md ("Trimarr").
    This file is the only place that knows Trimarr's routes: when trimarr/API.md is final, adjust them here.
    If Trimarr isn't installed or reachable, `available` is false and the UI hides or disables its controls. */

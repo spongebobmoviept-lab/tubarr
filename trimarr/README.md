@@ -1,28 +1,34 @@
-# Trimarr (optional add-on for Tubarr)
+# Trimarr (ad trimmer for Tubarr)
 
 Trimarr removes SponsorBlock-labelled **sponsor** and **self-promotion** segments from YouTube videos that are
 already in your Tubarr library. It works in place: the file keeps its path and name, so the Plex item and its watch
 state stay. The captions (`.en.srt`) and chapters are shifted to match.
 
-It's a separate small container (python-slim + ffmpeg, SQLite for state, an HTTP API in the same process). It never
-changes Tubarr's code, database or `.staging` folder, and it ships **off**: turn it on in Tubarr, **Settings → Trim ads**.
+It's a separate small container (python-slim + ffmpeg, SQLite for state, an HTTP API in the same process), kept apart
+from Tubarr on purpose so each one can only reach what it needs. It never changes Tubarr's code, database or
+`.staging` folder, and it ships **off**: turn it on in Tubarr, **Settings → Trim ads**.
 
 ## Run it
 
-```bash
-# in Tubarr's .env (both containers read it):
-#   TRIMARR_URL=http://trimarr:8791
-#   TRIMARR_TOKEN=<a long random secret, e.g. from: openssl rand -hex 32>
-mkdir -p trimarr-data && sudo chown 1000:1000 trimarr-data     # match PUID:PGID
-docker compose --profile trimarr up -d --build
-```
+Nothing extra: Tubarr's `docker-compose.yml` starts Trimarr together with Tubarr (`docker compose up -d`, see the
+[Quick start](../README.md#quick-start); its data folder is `TRIMARR_DATA_DIR`, default `./trimarr-data`, writable
+by PUID:PGID). There's no token to generate and nothing to enable at install time.
+
+**While it's off** (the default) Trimarr is idle: it doesn't scan the library, sends no SponsorBlock request and
+changes no files. It only answers Tubarr, and does what you ask for there (trim or undo one video, check one video,
+"Run a pass now"). Switching trimming on starts the first pass right away. The only thing that still happens while
+it's off is that originals kept from earlier trims are deleted when their keep period ends.
 
 Trimarr has **no published port and no users of its own**. You use it through Tubarr's signed-in web UI, which
 talks to it over the internal Docker network. Don't publish port 8791.
 
-Every request to Trimarr's API except `GET /health` must carry the shared secret `X-Trimarr-Token`, which is
-`TRIMARR_TOKEN` (at least 16 characters, the same value for Tubarr and Trimarr). If `TRIMARR_TOKEN` is missing or
-too short, Trimarr refuses every API request (HTTP 503) and logs why: it fails closed. It also only answers to the
+Every request to Trimarr's API except `GET /health` must carry the shared secret `X-Trimarr-Token`. It is created
+automatically: on its first start Tubarr writes a random 32-byte token to `/link/trimarr.token` in the small
+`trimarr-link` volume that only Tubarr (read-write) and Trimarr (read-only) mount. The volume lives in memory
+(tmpfs), owned by PUID:PGID with mode 750, and the file has mode 640. At start Trimarr waits up to a minute for it
+and then reads it live. For advanced setups, `TRIMARR_TOKEN` (at least 16 characters, the same value for both
+containers) overrides the file. Without a usable token Trimarr refuses every API request (HTTP 503) and logs why:
+it fails closed. The token is never logged, and neither Tubarr's nor Trimarr's API ever returns it. It also only answers to the
 host names `trimarr`, `localhost` and `127.0.0.1` (a DNS-rebinding defense); if you run it under another name, add
 it to `TRIMARR_ALLOWED_HOSTS` (comma-separated). There are no CORS headers: browsers never call Trimarr directly.
 
@@ -94,5 +100,5 @@ docker compose run --rm trimarr python -m trimarr status
 
 ```bash
 docker build -t trimarr:test ./trimarr
-docker run --rm --network none -v "$PWD/trimarr/tests:/app/tests:ro" --entrypoint python trimarr:test   -m unittest discover -s tests -v
+docker run --rm --network none -v "$PWD/trimarr/tests:/app/tests:ro" --entrypoint python trimarr:test -m unittest discover -s tests -v
 ```
