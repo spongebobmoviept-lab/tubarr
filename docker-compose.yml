@@ -1,0 +1,146 @@
+# Tubarr: YouTube subscriptions -> Plex. Copy .env.example to .env, set YOUTUBE_DIR (and PUID/PGID), then:
+#   docker compose up -d --build          (Tubarr + the PO-token helper)
+#   docker compose --profile trimarr up -d --build   (also the optional ad trimmer; needs TRIMARR_TOKEN in .env)
+# Open http://127.0.0.1:9194 on this host (or see "ports" below for LAN access) and follow the first-run setup. The
+# setup code is in: docker compose logs tubarr
+#
+# Security defaults: no privileged mode, no Docker socket, all Linux capabilities dropped, no-new-privileges,
+# read-only root filesystem (writable: only the mounted folders and an in-memory /tmp), non-root users, process and
+# memory limits, and separate networks so the helpers can only reach Tubarr, not each other (see "networks" at the
+# end). Put Tubarr behind a reverse proxy with HTTPS if it's reachable from anywhere but your own network
+# (README -> "Remote access").
+services:
+  tubarr:
+    build: .
+    image: tubarr:local                      # or a published image, e.g. ghcr.io/spongebobmoviept-lab/tubarr:0.1.0 (remove build:)
+    container_name: tubarr
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"      # the image refuses to run as root (uid 0)
+    env_file: .env
+    environment:
+      - TZ=${TZ:-UTC}
+      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # only used with the trimarr profile (the same value goes to Trimarr)
+    ports:
+      # Web UI + API, reachable only from this host by default. Published Docker ports BYPASS the host firewall
+      # (ufw/firewalld never see them), so opening it to the LAN makes it reachable by every device that can reach
+      # this host. Never port-forward 9194 on your router; for remote access use a reverse proxy with HTTPS or a VPN.
+      - "127.0.0.1:${TUBARR_PORT:-9194}:9194"
+      # LAN access (every interface of this host) instead: replace the line above with
+      # - "${TUBARR_PORT:-9194}:9194"
+    volumes:
+      - ${YOUTUBE_DIR:?set YOUTUBE_DIR in .env}:/youtube   # the library (Plex reads the same folder)
+      - ${TUBARR_DATA_DIR:-./data}:/data                    # database, settings, encrypted credentials, logs (kept mode 700)
+    read_only: true
+    tmpfs:
+      - /tmp                                 # also holds the optional yt-dlp auto-update (TUBARR_YTDLP_AUTOUPDATE=1)
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    mem_limit: 3g                            # ffmpeg merging 4K video and the web app together; raise if you see OOM kills
+    networks: [default, pot, trim]
+    depends_on: [bgutil-provider]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    # --- VPN instead of (or in front of) proxies: route Tubarr through a gluetun container. Uncomment the gluetun
+    # --- service below, then here: add `network_mode: "service:gluetun"`, REMOVE `ports:` and `networks:` (gluetun
+    # --- publishes 9194 and joins the networks instead). Tubarr keeps reaching http://bgutil-provider:4416 and
+    # --- http://trimarr:8791 by name through gluetun's network namespace.
+    # network_mode: "service:gluetun"
+
+  # Proof-of-origin (PO) token provider for yt-dlp. YouTube's player API expects a client attestation token; this
+  # helper generates it the way yt-dlp's maintainers recommend. No published port: only Tubarr can reach it (network
+  # "pot"); it fetches from YouTube through its own egress network, which Trimarr is not on.
+  # Pinned by digest; its version (2.0.0) must match the bgutil-ytdlp-pot-provider plugin in requirements.txt.
+  # When Tubarr uses a proxy, the yt-dlp plugin passes the same proxy to this helper with each request, so its
+  # YouTube traffic leaves through that proxy too.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider@sha256:ed86b6fdd5e430ddd7c8ce1adb55e1ab54db7c7dbc1bcbf3a82454a85b971164
+    container_name: tubarr-bgutil-provider
+    restart: unless-stopped
+    user: "1000:1000"                        # the image's own "node" user
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 512m
+    networks: [pot, pot-egress]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  # Optional: Trimarr cuts SponsorBlock "sponsor" and "self-promotion" segments out of videos already in the library
+  # (off until you switch it on in Tubarr: Settings -> Trim ads). Enable with --profile trimarr and set in .env:
+  # TRIMARR_URL=http://trimarr:8791 and TRIMARR_TOKEN (see .env.example). No published port: you use it through
+  # Tubarr's signed-in UI, and its API answers only requests carrying TRIMARR_TOKEN. It doesn't talk to Plex:
+  # Tubarr refreshes Plex after a trim. Its own egress network is only for the SponsorBlock API.
+  trimarr:
+    profiles: ["trimarr"]
+    build: ./trimarr
+    image: trimarr:local
+    container_name: trimarr
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - TZ=${TZ:-UTC}
+      - TRIMARR_TOKEN=${TRIMARR_TOKEN:-}     # required (16+ characters); without it Trimarr's API refuses everything
+      - PLEX_ROOT=${PLEX_ROOT:-}             # the library path as Plex sees it, if different from /youtube
+    volumes:
+      - ${YOUTUBE_DIR:?set YOUTUBE_DIR in .env}:/youtube
+      - ${TRIMARR_DATA_DIR:-./trimarr-data}:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 1g
+    networks: [trim, trim-egress]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  # --- Optional VPN (see README -> "Proxies and VPNs"). Commercial VPN addresses are often already flagged by
+  # --- YouTube; a residential proxy or a second connection of your own usually works better. Keep the pace slow.
+  # --- gluetun's firewall blocks everything outside the tunnel, including the Docker networks Tubarr uses to reach
+  # --- bgutil-provider and Trimarr: give those networks fixed subnets (uncomment the ipam lines under "networks"
+  # --- below) and list them, plus your LAN if Plex is there, in FIREWALL_OUTBOUND_SUBNETS.
+  # gluetun:
+  #   image: qmcgaw/gluetun:v3@sha256:fa19cc76b2af13d57a8d3dc3066f2ada061b1c761b8aecf989b3877c0486e027
+  #   container_name: tubarr-gluetun
+  #   cap_add: [NET_ADMIN]
+  #   devices: ["/dev/net/tun:/dev/net/tun"]
+  #   ports:
+  #     - "127.0.0.1:${TUBARR_PORT:-9194}:9194"   # same firewall warning as Tubarr's ports above
+  #   networks: [default, pot, trim]
+  #   environment:
+  #     - VPN_SERVICE_PROVIDER=your-provider
+  #     - VPN_TYPE=wireguard
+  #     # the "pot" and "trim" subnets below (and your LAN, e.g. 192.168.1.0/24, so Tubarr can still reach Plex)
+  #     - FIREWALL_OUTBOUND_SUBNETS=172.29.94.0/24,172.29.95.0/24${LAN_SUBNET:+,$LAN_SUBNET}
+  #   secrets: [wireguard_private_key]                # the key stays in a file, not in .env
+  #   restart: unless-stopped
+
+# Each helper gets exactly the reach it needs:
+#   default      Tubarr only: the published port and Tubarr's own internet access (YouTube, Plex, proxies)
+#   pot          internal (no internet): Tubarr <-> bgutil-provider
+#   pot-egress   bgutil-provider only: its requests to YouTube
+#   trim         internal (no internet): Tubarr <-> Trimarr
+#   trim-egress  Trimarr only: the SponsorBlock API
+# bgutil-provider and Trimarr share no network, so neither can reach the other.
+networks:
+  default: {}
+  pot:
+    internal: true
+    # ipam: {config: [{subnet: 172.29.94.0/24}]}      # fixed subnet: only needed with gluetun (see above)
+  pot-egress: {}
+  trim:
+    internal: true
+    # ipam: {config: [{subnet: 172.29.95.0/24}]}      # fixed subnet: only needed with gluetun (see above)
+  trim-egress: {}
+#
+# secrets:
+#   wireguard_private_key:
+#     file: ./secrets/wireguard_private_key            # chmod 600; gluetun reads /run/secrets/wireguard_private_key

@@ -1,0 +1,27 @@
+# Weekly update PRs for the pinned GitHub Actions (SHAs), Python lockfiles and base images (digests).
+# Python: Dependabot updates requirements.txt from requirements.in and keeps the hashes (pip-compile format).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /trimarr
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /trimarr
+    schedule:
+      interval: weekly

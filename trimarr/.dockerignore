@@ -1,0 +1,22 @@
+# Keep the build context (and the image) free of local state, secrets and dev-only files.
+.git
+.venv
+venv
+data
+trimarr-data
+tests
+**/__pycache__
+**/*.pyc
+*.md
+!README.md
+.env
+.env.*
+secrets
+**/*.key
+**/*.pem
+**/credentials.json
+**/auth.json
+**/cookies*.txt
+**/*.db
+**/*.db-wal
+**/*.db-shm

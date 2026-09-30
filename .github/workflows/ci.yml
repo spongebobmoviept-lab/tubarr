@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:          # docker-publish.yml runs these checks before it publishes anything
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      # Every action is pinned to a full commit SHA (the comment names the release); Dependabot keeps them current.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Python syntax
+        run: python -m compileall -q tubarr trimarr tests
+      - name: JavaScript syntax
+        run: for f in $(find web -name '*.js'); do node --check "$f"; done
+      - name: Build image
+        run: docker build -t tubarr:ci .
+      - name: Build Trimarr image
+        run: docker build -t trimarr:ci ./trimarr
+      # Tests run offline, as the image's unprivileged user, bypassing the entrypoint (it checks the mounted folders).
+      - name: Unit tests (inside the image)
+        run: >-
+          docker run --rm --network none -e TUBARR_DATA=/tmp/d -e TUBARR_ROOT=/tmp/y
+          -v "$PWD/tests:/app/tests:ro" --entrypoint python tubarr:ci -m unittest discover -s tests -v
+      - name: Trimarr unit tests (inside the Trimarr image)
+        run: >-
+          docker run --rm --network none -e TRIMARR_TOKEN=test-token-0123456789abcdef
+          -v "$PWD/trimarr/tests:/app/tests:ro" --entrypoint python trimarr:ci -m unittest discover -s tests -v

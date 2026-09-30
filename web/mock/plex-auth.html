@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plex sign-in (preview)</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #15181f; font: 14px/1.5 "Segoe UI", system-ui, sans-serif; color: #d9dce5; }
+  .page { display: grid; place-items: center; min-height: 100%; padding: 16px; box-sizing: border-box; }
+  .card { width: min(420px, 100%); border: 1px dashed #3a4150; border-radius: 14px; padding: 28px; text-align: center; box-sizing: border-box; }
+  h1 { font-size: 17px; margin: 0 0 8px; color: #eef0f6; }
+  p { margin: 0 0 12px; color: #9aa1b3; }
+  b { color: #eef0f6; letter-spacing: .12em; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="card">
+      <h1>Plex sign-in (preview)</h1>
+      <p>On a real server this window is Plex’s own sign-in page, where you allow Tubarr. In preview mode the code <b id="c"></b> is approved by itself in a few seconds, and this window closes.</p>
+    </div>
+  </div>
+<script>
+  document.getElementById('c').textContent = (location.hash.match(/code=(\w+)/) || [])[1] || '';
+  setTimeout(function () { try { window.close(); } catch (e) { /* opened on its own */ } }, 7000);
+</script>
+</body>
+</html>

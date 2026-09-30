@@ -1,0 +1,28 @@
+# Keep the build context (and the image) free of local state, secrets and dev-only files.
+.git
+.github
+.venv
+venv
+data
+trimarr-data
+docs
+tests
+**/__pycache__
+**/*.pyc
+*.md
+!README.md
+# the web UI's offline demo data is for development only and must never ship in the image
+web/mock
+# secrets and credentials, wherever they are
+.env
+.env.*
+!.env.example
+secrets
+**/*.key
+**/*.pem
+**/credentials.json
+**/auth.json
+**/cookies*.txt
+**/*.db
+**/*.db-wal
+**/*.db-shm

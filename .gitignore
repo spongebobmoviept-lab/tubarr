@@ -1,0 +1,24 @@
+# local configuration and data (never commit these: they hold your library state and encrypted credentials)
+.env
+data/
+trimarr-data/
+secrets/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+credentials.json
+auth.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

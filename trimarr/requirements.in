@@ -1,0 +1,4 @@
+# Trimarr runtime: the top-level dependencies. requirements.txt is generated from this file with hashes (see its
+# header); the image installs it with --require-hashes --only-binary=:all:.
+requests>=2.32,<3
+numpy>=2.1,<3

@@ -1,0 +1,16 @@
+# Tubarr runtime: the top-level dependencies. requirements.txt is generated from this file with hashes for every
+# package (see its header); the image installs it with --require-hashes --only-binary=:all:.
+# yt-dlp is pinned for reproducible builds; newer releases can optionally be loaded at container start
+# (TUBARR_YTDLP_AUTOUPDATE, off by default, see README "Updating").
+yt-dlp[default,curl-cffi]==2026.8.19
+# Must match the bgutil-provider image version in docker-compose.yml.
+bgutil-ytdlp-pot-provider==2.0.0
+Pillow>=11,<13
+plexapi>=4.17,<5
+requests[socks]>=2.32,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+argon2-cffi>=23.1,<26
+cryptography>=43,<47
+itsdangerous>=2.2,<3
+tzdata
