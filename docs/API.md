@@ -774,8 +774,7 @@ decides, per playlist); everything else is listed as ignored, with the reason.
 
 ## Trimarr (ad trimmer, proxied)
 
-Trimarr is a separate tool (another agent is building it; its own contract will be `trimarr/API.md`, which wins over
-this section). It trims sponsor segments out of videos **already in Plex** using SponsorBlock data. It ships **off**.
+Trimarr runs as its own container, installed and started together with Tubarr (see `trimarr/README.md`). It trims sponsor segments out of videos **already in Plex** using SponsorBlock data. It ships **off**.
 The UI keeps it visually secondary.
 
 The UI never talks to Trimarr directly: the Tubarr backend proxies it under **`/api/trimarr/…`** (same origin, no
