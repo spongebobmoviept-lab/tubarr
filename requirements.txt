@@ -65,9 +65,9 @@ argon2-cffi-bindings==26.1.0 \
     --hash=sha256:f9c4420a7a864fe1b86ce35befc95b8e39fb852493b81cf798671ddc265de638 \
     --hash=sha256:ffff613aaa9ce6236766e2fc6dc560bb5abde7a2e2416e3db1f9ae395a2b4dd4
     # via argon2-cffi
-bgutil-ytdlp-pot-provider==2.0.0 \
-    --hash=sha256:22884c399802771ddfd9275bb05b178d67c89db67a1d5d1e17ed7f681956628e \
-    --hash=sha256:dac2d1aeeac63218efe879e538e978d2efc088ed887124095e6fd6a09c3077df
+bgutil-ytdlp-pot-provider==2.0.1 \
+    --hash=sha256:8038cd744a5e2e12a56eab4a5319d0edd31e9f1e4beff5cb13487a19cb755310 \
+    --hash=sha256:ff6c2e85443e0777e2483e4a5ef2084ca745a1dd3cc07cf355ddd3a77bd882e8
     # via -r requirements.in
 brotli==1.2.0 \
     --hash=sha256:022426c9e99fd65d9475dce5c195526f04bb8be8907607e27e747893f6ee3e24 \
