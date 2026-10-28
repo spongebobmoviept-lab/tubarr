@@ -4,7 +4,7 @@
 # (not ARGs) so Dependabot can bump tag and digest together.
 
 # Deno: the JavaScript runtime yt-dlp needs for YouTube's player challenges (EJS). Copied from the official image.
-FROM denoland/deno:bin-2.4.5@sha256:4a0c035e554ee9961e40d2d20ff8ad05f273230c8a0290a7cbad214d5d26ab10 AS deno
+FROM denoland/deno:bin-2.9.8@sha256:b507583d3c68ba69f3ed2ce5969ae5b8b70f43421c781279c7aea06435263543 AS deno
 
 FROM python:3.12-slim-trixie@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 ARG TARGETARCH
